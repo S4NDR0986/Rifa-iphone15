@@ -1,25 +1,31 @@
+bash
+
+cat > /mnt/user-data/outputs/rifa.jsx << 'ENDOFFILE'
 import { useState, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBEjGKfSLjEuOi_0GiELxJoTBkLUB-M6S0",
+  authDomain: "rifa-iphone15.firebaseapp.com",
+  projectId: "rifa-iphone15",
+  storageBucket: "rifa-iphone15.firebasestorage.app",
+  messagingSenderId: "177591515487",
+  appId: "1:177591515487:web:c85449619a4a95537e1eea"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 const TOTAL = 400;
 const PRECIO = "10.000";
 const ADMIN_PASS = "Saz2014zoe//*";
-const STORAGE_KEY = "rifa-numeros-v1";
-
-function getOcupados() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveOcupados(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
 
 export default function Rifa() {
   const [step, setStep] = useState("grid");
   const [numElegido, setNumElegido] = useState(null);
   const [ocupados, setOcupados] = useState({});
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ nombre: "", apellido: "", celular: "" });
   const [comprobante, setComprobante] = useState(null);
   const [comprobantePreview, setComprobantePreview] = useState(null);
@@ -31,9 +37,17 @@ export default function Rifa() {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminSelected, setAdminSelected] = useState(null);
   const [tapCount, setTapCount] = useState(0);
+  const [guardando, setGuardando] = useState(false);
 
+  // Escuchar cambios en tiempo real desde Firebase
   useEffect(() => {
-    setOcupados(getOcupados());
+    const unsub = onSnapshot(collection(db, "numeros"), (snap) => {
+      const data = {};
+      snap.forEach(d => { data[d.id] = d.data(); });
+      setOcupados(data);
+      setLoading(false);
+    });
+    return () => unsub();
   }, []);
 
   const handleFooterTap = () => {
@@ -53,20 +67,17 @@ export default function Rifa() {
     }
   };
 
-  const handleMarcarVendido = (n) => {
+  const handleMarcarVendido = async (n) => {
     if (ocupados[n]) return;
-    const datos = { nombre: "— Admin —", apellido: "", celular: "—", fecha: new Date().toLocaleString("es-AR"), manual: true };
-    const nuevo = { ...ocupados, [n]: datos };
-    setOcupados(nuevo);
-    saveOcupados(nuevo);
+    await setDoc(doc(db, "numeros", String(n)), {
+      nombre: "— Admin —", apellido: "", celular: "—",
+      fecha: new Date().toLocaleString("es-AR"), manual: true
+    });
     setAdminSelected(null);
   };
 
-  const handleLiberarNumero = (n) => {
-    const nuevo = { ...ocupados };
-    delete nuevo[n];
-    setOcupados(nuevo);
-    saveOcupados(nuevo);
+  const handleLiberarNumero = async (n) => {
+    await deleteDoc(doc(db, "numeros", String(n)));
     setAdminSelected(null);
   };
 
@@ -101,13 +112,14 @@ export default function Rifa() {
     return e;
   };
 
-  const handleConfirmar = () => {
+  const handleConfirmar = async () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    const datos = { ...form, fecha: new Date().toLocaleString("es-AR") };
-    const nuevo = { ...ocupados, [numElegido]: datos };
-    setOcupados(nuevo);
-    saveOcupados(nuevo);
+    setGuardando(true);
+    await setDoc(doc(db, "numeros", String(numElegido)), {
+      ...form, fecha: new Date().toLocaleString("es-AR")
+    });
+    setGuardando(false);
     setStep("confirm");
   };
 
@@ -119,6 +131,17 @@ export default function Rifa() {
     return "free";
   };
 
+  // ── LOADING ──
+  if (loading) return (
+    <div style={{ ...styles.root, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🎟️</div>
+        <div style={{ color: "#94a3b8", fontSize: 16 }}>Cargando rifa...</div>
+      </div>
+    </div>
+  );
+
+  // ── ADMIN PANEL ──
   if (adminMode) {
     const participantes = Object.entries(ocupados).sort((a, b) => Number(a[0]) - Number(b[0]));
     return (
@@ -153,6 +176,7 @@ export default function Rifa() {
             );
           })}
         </div>
+
         {adminSelected && (
           <div style={styles.modalOverlay}>
             <div style={styles.modal}>
@@ -182,6 +206,7 @@ export default function Rifa() {
             </div>
           </div>
         )}
+
         <div style={{ maxWidth: 500, margin: "16px auto 40px", padding: "0 12px" }}>
           <div style={{ fontWeight: 700, color: "#a78bfa", marginBottom: 10, fontSize: 15 }}>
             📋 Lista de participantes ({participantes.length})
@@ -204,28 +229,24 @@ export default function Rifa() {
     );
   }
 
-  if (showAdminLogin) {
-    return (
-      <div style={styles.modalOverlay}>
-        <div style={styles.modal}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🔐</div>
-          <h3 style={{ margin: "0 0 16px", color: "#f8fafc" }}>Acceso Admin</h3>
-          <input
-            type="password"
-            placeholder="Contraseña"
-            value={adminInput}
-            onChange={e => { setAdminInput(e.target.value); setAdminError(false); }}
-            onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
-            style={{ ...inputStyle(adminError), marginBottom: 8, color: "#1a1a1a" }}
-          />
-          {adminError && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>Contraseña incorrecta</div>}
-          <button style={styles.btnPrimary} onClick={handleAdminLogin}>Entrar</button>
-          <button style={{ ...styles.btnSecondary, marginTop: 8 }} onClick={() => { setShowAdminLogin(false); setAdminInput(""); setAdminError(false); }}>Cancelar</button>
-        </div>
+  // ── LOGIN ADMIN ──
+  if (showAdminLogin) return (
+    <div style={styles.modalOverlay}>
+      <div style={styles.modal}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>🔐</div>
+        <h3 style={{ margin: "0 0 16px", color: "#f8fafc" }}>Acceso Admin</h3>
+        <input type="password" placeholder="Contraseña" value={adminInput}
+          onChange={e => { setAdminInput(e.target.value); setAdminError(false); }}
+          onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
+          style={{ ...inputStyle(adminError), marginBottom: 8, color: "#1a1a1a" }} />
+        {adminError && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>Contraseña incorrecta</div>}
+        <button style={styles.btnPrimary} onClick={handleAdminLogin}>Entrar</button>
+        <button style={{ ...styles.btnSecondary, marginTop: 8 }} onClick={() => { setShowAdminLogin(false); setAdminInput(""); setAdminError(false); }}>Cancelar</button>
       </div>
-    );
-  }
+    </div>
+  );
 
+  // ── CONFIRMACIÓN ──
   if (step === "confirm") return (
     <div style={styles.root}>
       <div style={styles.confirmBox}>
@@ -243,6 +264,7 @@ export default function Rifa() {
     </div>
   );
 
+  // ── FORMULARIO ──
   if (step === "form") return (
     <div style={styles.root}>
       <div style={styles.formBox}>
@@ -280,11 +302,14 @@ export default function Rifa() {
                 : <div style={styles.filePlaceholder}>📎 Tocá para subir imagen</div>}
             </label>
           } />
-        <button style={styles.btnPrimary} onClick={handleConfirmar}>Confirmar reserva →</button>
+        <button style={{ ...styles.btnPrimary, opacity: guardando ? 0.7 : 1 }} onClick={handleConfirmar} disabled={guardando}>
+          {guardando ? "Guardando..." : "Confirmar reserva →"}
+        </button>
       </div>
     </div>
   );
 
+  // ── GRILLA PRINCIPAL ──
   return (
     <div style={styles.root}>
       <div style={styles.header}>
@@ -399,3 +424,8 @@ const styles = {
   participanteInfo: { flex: 1, fontSize: 13, color: "#f8fafc" },
   btnLiberar: { background: "#7f1d1d", border: "none", color: "#fca5a5", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 13 },
 };
+ENDOFFILE
+echo "OK"
+Salida
+
+OK
