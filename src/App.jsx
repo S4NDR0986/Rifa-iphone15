@@ -1,6 +1,3 @@
-bash
-
-cat > /mnt/user-data/outputs/rifa.jsx << 'ENDOFFILE'
 import { useState, useEffect } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
@@ -424,8 +421,3 @@ const styles = {
   participanteInfo: { flex: 1, fontSize: 13, color: "#f8fafc" },
   btnLiberar: { background: "#7f1d1d", border: "none", color: "#fca5a5", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 13 },
 };
-ENDOFFILE
-echo "OK"
-Salida
-
-OK
